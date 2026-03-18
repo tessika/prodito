@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fingerboard Hero - Fixed Ramps</title>
+    <title>Fingerboard Hero - Audio Update</title>
     <style>
         body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Arial Black', sans-serif; }
         #ui { position: absolute; top: 20px; left: 20px; color: white; text-shadow: 2px 2px #000; pointer-events: none; z-index: 10; display: none; }
@@ -23,6 +23,7 @@
     <div id="overlay">
         <h1>FINGERBOARD HERO</h1>
         <p>PRESS [SPACE] TO START</p>
+        <div style="font-size: 0.8rem; margin-top: 10px; opacity: 0.8;">MUSIC BY PRODITO</div>
     </div>
     <div id="ui">
         <h1 style="margin:0">SCORE: <span id="score">0</span></h1>
@@ -32,6 +33,38 @@
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
+        // --- AUDIO ENGINE ---
+        const soundtracks = ['./data/prodito1.mp3', './data/prodito2.mp3'];
+        let currentTrack = new Audio();
+        currentTrack.loop = true;
+
+        // Sound FX Registry for future additions
+        const soundFX = {
+            jump: null,      // e.g., new Audio('./data/pop.mp3')
+            land: null,
+            grind: null,
+            trick: null,
+            fail: null
+        };
+
+        function playRandomTrack() {
+            const trackFile = soundtracks[Math.floor(Math.random() * soundtracks.length)];
+            currentTrack.src = trackFile;
+            currentTrack.play().catch(e => console.log("Audio waiting for interaction"));
+        }
+
+        function stopMusic() {
+            currentTrack.pause();
+            currentTrack.currentTime = 0;
+        }
+
+        // Handle Page Focus (Auto-pause if tab hidden)
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) currentTrack.pause();
+            else if (gameActive) currentTrack.play();
+        });
+
+        // --- GAME ENGINE ---
         let gameActive = false, isGrounded = true, isGrinding = false;
         let score = 0, multiplier = 1, speed = 0.45, velocityY = 0;
         let spacePressed = false, lastSpaceRelease = 0;
@@ -75,28 +108,22 @@
         function spawnObstacle() {
             const rand = Math.random();
             let obs, type, len = 0.6, isRail = false, isRamp = false;
-
-            if (rand < 0.35) { // RAMP
+            if (rand < 0.3) {
                 isRamp = true;
-                const rampGeom = new THREE.BoxGeometry(5, 2, 6);
-                const rampMat = new THREE.MeshStandardMaterial({ color: 0x777777 });
-                obs = new THREE.Mesh(rampGeom, rampMat);
-                // FIXED DIRECTION: Rotated 18 degrees positive to face the player
-                obs.rotation.x = Math.PI / 10; 
-                obs.position.y = 0.1;
+                obs = new THREE.Mesh(new THREE.BoxGeometry(5, 2, 6), new THREE.MeshStandardMaterial({ color: 0x777777 }));
+                obs.rotation.x = Math.PI / 10; obs.position.y = 0.1;
                 type = "BIG AIR";
-            } else if (rand < 0.75) { // RAIL
+            } else if (rand < 0.7) {
                 isRail = true;
                 len = 12 + Math.random() * 20;
                 obs = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, len), new THREE.MeshStandardMaterial({ color: 0xffcc00 }));
                 obs.position.y = 1.2;
                 type = "SLIDE";
-            } else { // BARRIER
+            } else {
                 obs = new THREE.Mesh(new THREE.BoxGeometry(5, 1.2, 0.6), new THREE.MeshStandardMaterial({ color: 0xff4444 }));
                 obs.position.y = 0.6;
                 type = "JUMP";
             }
-
             obs.add(createBanner(type));
             obs.userData = { isRail, isRamp, type, halfLen: (isRamp ? 3 : len/2), matched: false };
             obs.position.z = -150;
@@ -153,6 +180,7 @@
             document.getElementById('overlay').style.display = 'none';
             document.getElementById('ui').style.display = 'block';
             score = 0; multiplier = 1;
+            playRandomTrack();
         }
 
         function exitGrind(pop) {
@@ -167,6 +195,7 @@
             document.getElementById('overlay').style.display = 'flex';
             obstacles.forEach(o => scene.remove(o)); obstacles.length = 0;
             boardGroup.rotation.set(0,0,0);
+            stopMusic();
         }
 
         let spawnTimer = 0;
@@ -175,7 +204,6 @@
             requestAnimationFrame(animate);
             if (!gameActive) { camera.lookAt(0,0,0); renderer.render(scene, camera); return; }
 
-            // Adaptive Camera
             if (isGrinding) { targetCamX = 18; targetCamZ = 4; }
             else if (isDoingTrick) { targetCamX = 0; targetCamZ = 12; }
             else { targetCamX = 12; targetCamZ = 8; }
@@ -185,7 +213,6 @@
             camera.position.set(camX, 5, camZ);
             camera.lookAt(0, 0, -5);
 
-            // Physics
             if (isGrinding) {
                 boardGroup.position.y = 1.48; boardGroup.rotation.y = Math.PI / 2;
                 score += 2;
@@ -209,10 +236,8 @@
                 const dz = Math.abs(boardGroup.position.z - o.position.z);
                 const dy = boardGroup.position.y - o.position.y;
 
-                // FIXED RAMP LOGIC
                 if (o.userData.isRamp && dx < 2.5 && dz < 3 && isGrounded && o.position.z < boardGroup.position.z) {
-                    velocityY = RAMP_BOOST;
-                    isGrounded = false;
+                    velocityY = RAMP_BOOST; isGrounded = false;
                     score += 500;
                     document.getElementById('trick-alert').innerText = "BIG AIR!";
                     document.getElementById('trick-alert').style.opacity = "1";
