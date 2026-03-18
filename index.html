@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fingerboard Hero - Sideways Grinds</title>
+    <title>Fingerboard Hero - Fixed Ramps</title>
     <style>
         body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Arial Black', sans-serif; }
         #ui { position: absolute; top: 20px; left: 20px; color: white; text-shadow: 2px 2px #000; pointer-events: none; z-index: 10; display: none; }
@@ -35,7 +35,7 @@
         let gameActive = false, isGrounded = true, isGrinding = false;
         let score = 0, multiplier = 1, speed = 0.45, velocityY = 0;
         let spacePressed = false, lastSpaceRelease = 0;
-        const GRAVITY = -0.014, JUMP_FORCE = 0.38;
+        const GRAVITY = -0.014, JUMP_FORCE = 0.38, RAMP_BOOST = 0.52;
 
         let camX = 12, camZ = 8, targetCamX = 12, targetCamZ = 8;
         const LERP_SPEED = 0.05;
@@ -73,16 +73,33 @@
         }
 
         function spawnObstacle() {
-            const isRail = Math.random() > 0.4;
-            const len = isRail ? 12 + Math.random() * 20 : 0.6; // Longer rails for "long slides"
-            const obs = new THREE.Mesh(
-                new THREE.BoxGeometry(isRail ? 0.4 : 5, isRail ? 0.4 : 1.2, len),
-                new THREE.MeshStandardMaterial({ color: isRail ? 0xffcc00 : 0xff4444 })
-            );
-            const type = isRail ? "SLIDE" : (Math.random() > 0.5 ? "JUMP" : "TRICK");
+            const rand = Math.random();
+            let obs, type, len = 0.6, isRail = false, isRamp = false;
+
+            if (rand < 0.35) { // RAMP
+                isRamp = true;
+                const rampGeom = new THREE.BoxGeometry(5, 2, 6);
+                const rampMat = new THREE.MeshStandardMaterial({ color: 0x777777 });
+                obs = new THREE.Mesh(rampGeom, rampMat);
+                // FIXED DIRECTION: Rotated 18 degrees positive to face the player
+                obs.rotation.x = Math.PI / 10; 
+                obs.position.y = 0.1;
+                type = "BIG AIR";
+            } else if (rand < 0.75) { // RAIL
+                isRail = true;
+                len = 12 + Math.random() * 20;
+                obs = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, len), new THREE.MeshStandardMaterial({ color: 0xffcc00 }));
+                obs.position.y = 1.2;
+                type = "SLIDE";
+            } else { // BARRIER
+                obs = new THREE.Mesh(new THREE.BoxGeometry(5, 1.2, 0.6), new THREE.MeshStandardMaterial({ color: 0xff4444 }));
+                obs.position.y = 0.6;
+                type = "JUMP";
+            }
+
             obs.add(createBanner(type));
-            obs.userData = { isRail, type, halfLen: len/2, matched: false };
-            obs.position.set(0, isRail ? 1.2 : 0.6, -150);
+            obs.userData = { isRail, isRamp, type, halfLen: (isRamp ? 3 : len/2), matched: false };
+            obs.position.z = -150;
             scene.add(obs);
             obstacles.push(obs);
         }
@@ -109,9 +126,8 @@
         window.addEventListener('keydown', (e) => {
             if (e.code === 'Space' && !spacePressed) {
                 spacePressed = true;
-                const now = Date.now();
                 if (!gameActive) { startGame(); return; }
-                if (now - lastSpaceRelease < 200 && isGrounded) {
+                if (Date.now() - lastSpaceRelease < 200 && isGrounded) {
                     velocityY = JUMP_FORCE; isGrounded = false;
                     doTrick("DOUBLE KICKFLIP", 0.6, 0.2);
                 } else if (isGrounded) {
@@ -159,24 +175,19 @@
             requestAnimationFrame(animate);
             if (!gameActive) { camera.lookAt(0,0,0); renderer.render(scene, camera); return; }
 
-            // Dynamic Camera States
-            if (isGrinding) {
-                targetCamX = 18; targetCamZ = 4;
-            } else if (isDoingTrick) {
-                targetCamX = 0; targetCamZ = 12;
-            } else {
-                targetCamX = 12; targetCamZ = 8;
-            }
+            // Adaptive Camera
+            if (isGrinding) { targetCamX = 18; targetCamZ = 4; }
+            else if (isDoingTrick) { targetCamX = 0; targetCamZ = 12; }
+            else { targetCamX = 12; targetCamZ = 8; }
 
             camX += (targetCamX - camX) * LERP_SPEED;
             camZ += (targetCamZ - camZ) * LERP_SPEED;
             camera.position.set(camX, 5, camZ);
             camera.lookAt(0, 0, -5);
 
-            // Sideways Board Logic
+            // Physics
             if (isGrinding) {
-                boardGroup.position.y = 1.48;
-                boardGroup.rotation.y = Math.PI / 2; // Sideways for slides
+                boardGroup.position.y = 1.48; boardGroup.rotation.y = Math.PI / 2;
                 score += 2;
             } else if (!isGrounded) {
                 velocityY += GRAVITY;
@@ -190,7 +201,7 @@
 
             floor.forEach(t => { t.position.z += speed; if(t.position.z > 20) t.position.z = -230; });
 
-            if (++spawnTimer > 160) { spawnObstacle(); spawnTimer = 0; }
+            if (++spawnTimer > 150) { spawnObstacle(); spawnTimer = 0; }
 
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 const o = obstacles[i]; o.position.z += speed;
@@ -198,11 +209,21 @@
                 const dz = Math.abs(boardGroup.position.z - o.position.z);
                 const dy = boardGroup.position.y - o.position.y;
 
+                // FIXED RAMP LOGIC
+                if (o.userData.isRamp && dx < 2.5 && dz < 3 && isGrounded && o.position.z < boardGroup.position.z) {
+                    velocityY = RAMP_BOOST;
+                    isGrounded = false;
+                    score += 500;
+                    document.getElementById('trick-alert').innerText = "BIG AIR!";
+                    document.getElementById('trick-alert').style.opacity = "1";
+                    setTimeout(() => document.getElementById('trick-alert').style.opacity = "0", 800);
+                }
+
                 if (dx < 1.8 && dz < o.userData.halfLen) {
                     if (o.userData.isRail && spacePressed && dy > 0) { isGrinding = true; }
-                    else if (!isGrinding && Math.abs(dy) < 0.7) { handleGameOver(); }
+                    else if (!isGrinding && !o.userData.isRamp && Math.abs(dy) < 0.7) { handleGameOver(); }
                 } else if (isGrinding && o.userData.isRail && dz >= o.userData.halfLen) {
-                    exitGrind(0.12); // Pop off cleanly
+                    exitGrind(0.12);
                 }
                 if (o.position.z > 25) { scene.remove(o); obstacles.splice(i, 1); score += 10; }
             }
