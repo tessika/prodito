@@ -2,77 +2,107 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fingerboard Hero - Audio Update</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fingerboard Hero</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Arial Black', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Arial Black', sans-serif; touch-action: none; }
         #ui { position: absolute; top: 20px; left: 20px; color: white; text-shadow: 2px 2px #000; pointer-events: none; z-index: 10; display: none; }
+        
         #overlay { 
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            background: rgba(0,0,0,0.6); display: flex; flex-direction: column; 
+            background: rgba(0,0,0,0.7); display: flex; flex-direction: column; 
             justify-content: center; align-items: center; color: white; z-index: 20;
+            text-align: center; padding: 20px; box-sizing: border-box;
         }
-        #trick-alert { position: absolute; top: 30%; left: 50%; transform: translateX(-50%); color: #00ff00; font-size: 2.5rem; text-shadow: 3px 3px #000; font-style: italic; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+
+        /* Responsive Instruction Text */
+        .desktop-info { display: block; }
+        .mobile-info { display: none; }
+
+        @media (max-width: 900px) {
+            .desktop-info { display: none; }
+            .mobile-info { display: block; }
+        }
+
+        #trick-alert { position: absolute; top: 25%; left: 50%; transform: translateX(-50%); color: #00ff00; font-size: 2rem; text-shadow: 3px 3px #000; font-style: italic; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
         #flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: white; opacity: 0; pointer-events: none; z-index: 30; }
+        
+        /* MOBILE BUTTONS */
+        #mobile-controls {
+            position: absolute; bottom: 40px; width: 100%; display: none;
+            justify-content: space-around; align-items: center; z-index: 25; padding: 0 20px; box-sizing: border-box;
+        }
+        .btn {
+            width: 80px; height: 80px; background: rgba(255,255,255,0.15); 
+            border: 4px solid white; border-radius: 50%; color: white;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 1.5rem; user-select: none; -webkit-tap-highlight-color: transparent;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        .btn:active { background: rgba(255,255,255,0.4); transform: scale(0.9); }
+        #jump-btn { width: 110px; height: 110px; background: rgba(0, 255, 100, 0.2); font-weight: bold; }
+
+        @media (max-width: 900px) { #mobile-controls { display: flex; } }
         canvas { display: block; }
     </style>
 </head>
 <body>
     <div id="flash"></div>
     <div id="trick-alert">TRICK!</div>
-    <div id="overlay">
+
+    <div id="overlay" onclick="startGame()">
         <h1>FINGERBOARD HERO</h1>
-        <p>PRESS [SPACE] TO START</p>
-        <div style="font-size: 0.8rem; margin-top: 10px; opacity: 0.8;">MUSIC BY PRODITO</div>
+        
+        <div class="desktop-info">
+            <p>PRESS [SPACE] TO START</p>
+            <p style="font-size: 0.9rem; opacity: 0.8;">ARROWS: TRICKS | HOLD SPACE: GRIND</p>
+        </div>
+
+        <div class="mobile-info">
+            <p>TAP SCREEN TO START</p>
+            <p style="font-size: 0.9rem; opacity: 0.8;">USE ON-SCREEN BUTTONS TO SKATE</p>
+        </div>
+        
+        <p style="font-size: 0.7rem; margin-top: 20px; color: #aaa;">MUSIC BY PRODITO</p>
     </div>
+
     <div id="ui">
         <h1 style="margin:0">SCORE: <span id="score">0</span></h1>
         <h2 id="multiplier" style="margin:0">COMBO x1</h2>
     </div>
 
+    <div id="mobile-controls">
+        <div class="btn" id="left-btn">FLIP</div>
+        <div class="btn" id="jump-btn">JUMP</div>
+        <div class="btn" id="right-btn">SHUV</div>
+    </div>
+
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
 
-        // --- AUDIO ENGINE ---
+        // --- AUDIO ---
         const soundtracks = ['./data/prodito1.mp3', './data/prodito2.mp3'];
         let currentTrack = new Audio();
         currentTrack.loop = true;
 
-        // Sound FX Registry for future additions
-        const soundFX = {
-            jump: null,      // e.g., new Audio('./data/pop.mp3')
-            land: null,
-            grind: null,
-            trick: null,
-            fail: null
-        };
-
         function playRandomTrack() {
             const trackFile = soundtracks[Math.floor(Math.random() * soundtracks.length)];
             currentTrack.src = trackFile;
-            currentTrack.play().catch(e => console.log("Audio waiting for interaction"));
+            currentTrack.play().catch(() => {});
         }
 
-        function stopMusic() {
-            currentTrack.pause();
-            currentTrack.currentTime = 0;
-        }
+        function stopMusic() { currentTrack.pause(); currentTrack.currentTime = 0; }
 
-        // Handle Page Focus (Auto-pause if tab hidden)
-        document.addEventListener("visibilitychange", () => {
-            if (document.hidden) currentTrack.pause();
-            else if (gameActive) currentTrack.play();
-        });
-
-        // --- GAME ENGINE ---
+        // --- STATE ---
         let gameActive = false, isGrounded = true, isGrinding = false;
         let score = 0, multiplier = 1, speed = 0.45, velocityY = 0;
-        let spacePressed = false, lastSpaceRelease = 0;
+        let jumpActive = false, lastJumpTime = 0;
         const GRAVITY = -0.014, JUMP_FORCE = 0.38, RAMP_BOOST = 0.52;
 
-        let camX = 12, camZ = 8, targetCamX = 12, targetCamZ = 8;
+        let camX = 12, targetCamX = 12, camZ = 8, targetCamZ = 8;
         const LERP_SPEED = 0.05;
 
+        // --- THREE.JS SETUP ---
         const scene = new THREE.Scene();
         scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -100,9 +130,7 @@
             ctx.fillStyle = 'rgba(255, 255, 0, 0.9)'; ctx.fillRect(0,0,256,64);
             ctx.font = 'bold 35px Arial'; ctx.fillStyle = 'black'; ctx.textAlign = 'center';
             ctx.fillText(text, 128, 45);
-            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
-            sprite.scale.set(4, 1, 1); sprite.position.y = 3;
-            return sprite;
+            return new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
         }
 
         function spawnObstacle() {
@@ -124,8 +152,9 @@
                 obs.position.y = 0.6;
                 type = "JUMP";
             }
-            obs.add(createBanner(type));
-            obs.userData = { isRail, isRamp, type, halfLen: (isRamp ? 3 : len/2), matched: false };
+            const banner = createBanner(type); banner.scale.set(4, 1, 1); banner.position.y = 3;
+            obs.add(banner);
+            obs.userData = { isRail, isRamp, type, halfLen: (isRamp ? 3 : len/2) };
             obs.position.z = -150;
             scene.add(obs);
             obstacles.push(obs);
@@ -138,6 +167,7 @@
             scene.add(t); floor.push(t);
         }
 
+        // --- TRICK LOGIC ---
         let trickRot = { x: 0, y: 0 };
         let isDoingTrick = false;
 
@@ -150,43 +180,54 @@
             setTimeout(() => { el.style.opacity = "0"; isDoingTrick = false; }, 800);
         }
 
-        window.addEventListener('keydown', (e) => {
-            if (e.code === 'Space' && !spacePressed) {
-                spacePressed = true;
-                if (!gameActive) { startGame(); return; }
-                if (Date.now() - lastSpaceRelease < 200 && isGrounded) {
-                    velocityY = JUMP_FORCE; isGrounded = false;
-                    doTrick("DOUBLE KICKFLIP", 0.6, 0.2);
-                } else if (isGrounded) {
-                    velocityY = JUMP_FORCE; isGrounded = false;
-                }
+        // --- HYBRID INPUT HANDLERS ---
+        function onJumpStart() {
+            if (!gameActive) { startGame(); return; }
+            jumpActive = true;
+            const now = Date.now();
+            if (now - lastJumpTime < 200 && isGrounded) {
+                velocityY = JUMP_FORCE; isGrounded = false;
+                doTrick("DOUBLE KICKFLIP", 0.6, 0.2);
+            } else if (isGrounded) {
+                velocityY = JUMP_FORCE; isGrounded = false;
             }
+            lastJumpTime = now;
+        }
+
+        function onJumpEnd() {
+            jumpActive = false;
+            if (isGrinding) { isGrinding = false; isGrounded = false; velocityY = 0.15; boardGroup.rotation.y = 0; }
+        }
+
+        // Listeners
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !jumpActive) onJumpStart();
             if (!isGrounded && !isGrinding) {
                 if (e.code === 'ArrowUp') doTrick("360 SHUVIT", 0, 0.4);
                 if (e.code === 'ArrowDown') doTrick("HEELFLIP", 0.4, 0.4);
             }
         });
+        window.addEventListener('keyup', (e) => { if (e.code === 'Space') onJumpEnd(); });
 
-        window.addEventListener('keyup', (e) => {
-            if (e.code === 'Space') {
-                spacePressed = false;
-                lastSpaceRelease = Date.now();
-                if (isGrinding) exitGrind(0.15);
-            }
-        });
+        const bindTouch = (id, start, end) => {
+            const el = document.getElementById(id);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); start(); });
+            if (end) el.addEventListener('touchend', (e) => { e.preventDefault(); end(); });
+        };
+
+        bindTouch('jump-btn', onJumpStart, onJumpEnd);
+        bindTouch('left-btn', () => doTrick("KICKFLIP", 0.4, 0));
+        bindTouch('right-btn', () => doTrick("SHUVIT", 0, 0.4));
 
         function startGame() {
+            if (gameActive) return;
             gameActive = true;
             document.getElementById('overlay').style.display = 'none';
             document.getElementById('ui').style.display = 'block';
             score = 0; multiplier = 1;
             playRandomTrack();
         }
-
-        function exitGrind(pop) {
-            isGrinding = false; isGrounded = false;
-            velocityY = pop; boardGroup.rotation.y = 0;
-        }
+        window.startGame = startGame;
 
         function handleGameOver() {
             document.getElementById('flash').style.opacity = '1';
@@ -199,11 +240,11 @@
         }
 
         let spawnTimer = 0;
-
         function animate() {
             requestAnimationFrame(animate);
             if (!gameActive) { camera.lookAt(0,0,0); renderer.render(scene, camera); return; }
 
+            // Camera Logic
             if (isGrinding) { targetCamX = 18; targetCamZ = 4; }
             else if (isDoingTrick) { targetCamX = 0; targetCamZ = 12; }
             else { targetCamX = 12; targetCamZ = 8; }
@@ -213,8 +254,9 @@
             camera.position.set(camX, 5, camZ);
             camera.lookAt(0, 0, -5);
 
+            // Sideways Grinds & Physics
             if (isGrinding) {
-                boardGroup.position.y = 1.48; boardGroup.rotation.y = Math.PI / 2;
+                boardGroup.position.y = 1.48; boardGroup.rotation.y = Math.PI / 2; // Sideways
                 score += 2;
             } else if (!isGrounded) {
                 velocityY += GRAVITY;
@@ -227,7 +269,6 @@
             }
 
             floor.forEach(t => { t.position.z += speed; if(t.position.z > 20) t.position.z = -230; });
-
             if (++spawnTimer > 150) { spawnObstacle(); spawnTimer = 0; }
 
             for (let i = obstacles.length - 1; i >= 0; i--) {
@@ -245,10 +286,10 @@
                 }
 
                 if (dx < 1.8 && dz < o.userData.halfLen) {
-                    if (o.userData.isRail && spacePressed && dy > 0) { isGrinding = true; }
+                    if (o.userData.isRail && jumpActive && dy > 0) { isGrinding = true; }
                     else if (!isGrinding && !o.userData.isRamp && Math.abs(dy) < 0.7) { handleGameOver(); }
                 } else if (isGrinding && o.userData.isRail && dz >= o.userData.halfLen) {
-                    exitGrind(0.12);
+                    isGrinding = false; isGrounded = false; velocityY = 0.12; boardGroup.rotation.y = 0;
                 }
                 if (o.position.z > 25) { scene.remove(o); obstacles.splice(i, 1); score += 10; }
             }
